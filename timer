@@ -1,7 +1,7 @@
 #!/bin/bash
 
 PROGRAM=timer
-VERSION=0.1.0
+VERSION=0.1.1
 
 RUNTIME_DIR="${SCAPTURE_RECORDS_PREFIX:-${XDG_RUNTIME_DIR:+${XDG_RUNTIME_DIR}/${PROGRAM}}}"
 
@@ -73,7 +73,7 @@ make_runtime_dir() {
 }
 
 time_left() {
-	now="${EPOCHSECONDS}"
+	local now="${EPOCHSECONDS}"
 	left="$(( ts - now + duration - elapsed ))"
 	echo "$(( left > 0 ? left : 0 ))"
 }
@@ -143,7 +143,7 @@ cmd_left() {
 	check_runtime_dir
 	[ $# -ge 1 ] || die --usage 'timer name is not specified'
 
-	local timer="$1" file ts state elapsed duration now left
+	local timer="$1" file ts state elapsed duration left
 
 	check_name_sanity "${timer}"
 
