@@ -1,0 +1,209 @@
+#!/bin/bash
+
+PROGRAM=timer
+VERSION=0.1.0
+
+RUNTIME_DIR="${SCAPTURE_RECORDS_PREFIX:-${XDG_RUNTIME_DIR:+${XDG_RUNTIME_DIR}/${PROGRAM}}}"
+
+print_usage() {
+	cat <<- EOF
+
+		Usage:
+		    ${PROGRAM} start TIMER DURATION
+		        Start a new timer with name TIMER and DURATION.
+		        DURATION can be specifiead like 1s, 1m, 1h etc...
+		    ${PROGRAM} stop TIMER
+		        Stop and delete TIMER.
+		    ${PROGRAM} is-active TIMER
+		        Exit with 0 if TIMER in active state.
+		    ${PROGRAM} left TIMER
+		        Print remaining time in seconds for the TIMER.
+		    ${PROGRAM} help
+		        Print this message.
+	EOF
+}
+
+die() {
+	local usage=0
+	if [ "$1" = --usage ]; then
+		usage=1 && shift
+	fi
+
+	if [ $# -gt 0 ]; then
+		printf "${PROGRAM}: $1\n" "$2" 1>&2
+	fi
+
+	if (( usage )); then
+		print_usage
+	fi
+
+	exit 1
+}
+
+die_cmdnotimpl() {
+	die 'command is not implemented yet: %s' "$1"
+}
+
+check_runtime_dir() {
+	[ -n "${RUNTIME_DIR}" ] || die 'runtime directory is not configured'
+}
+
+check_name_sanity() {
+	[[ "$1" =~ ^[0-9A-Za-z]+(-[0-9A-Za-z]+)*$ ]] \
+		|| die 'bad timer name: %s' "$1"
+}
+
+check_status_sanity() {
+	[[ "$1" =~ ^(a|p)$ ]] \
+		|| die 'bad status specification in a file: %s' "$1"
+}
+
+check_integer_sanity() {
+	[[ "$1" =~ ^[0-9]+$ ]] \
+		|| die "bad ${2} specification in a file: %s" "$1"
+}
+
+timer_file() {
+	echo "${RUNTIME_DIR}/${timer}.timer"
+}
+
+make_runtime_dir() {
+	mkdir --parents "${RUNTIME_DIR}" \
+		|| die 'can not make runtime directory: %s' "${RUNTIME_DIR}"
+}
+
+time_left() {
+	now="${EPOCHSECONDS}"
+	left="$(( ts - now + duration - elapsed ))"
+	echo "$(( left > 0 ? left : 0 ))"
+}
+
+cmd_start() {
+	check_runtime_dir
+	[ $# -ge 1 ] || die --usage 'timer name and duration is not specified'
+	[ $# -ge 2 ] || die --usage 'duration is not specified'
+
+	local timer="$1" duration_input="$2" duration file ts
+
+	check_name_sanity "${timer}"
+
+	# Correction of -1 is needed because dateadd isn't accepted 0 as date/time value
+	duration="$(( $(dateadd --input-format=%s --format=%s 1 "+${duration_input}") - 1 ))" \
+		|| die 'can not convert duration to seconds: %s' "${duration_input}"
+
+	file="$(timer_file ${timer})"
+	[ ! -e "${file}" ] || die 'timer already exists: %s' "${timer}"
+
+	ts="${EPOCHSECONDS}"
+
+	make_runtime_dir
+	echo -e "${ts} a 0 ${duration}\n${ts}" > "${file}"
+}
+
+cmd_pause() { die_cmdnotimpl pause; }
+cmd_resume() { die_cmdnotimpl resume; }
+
+cmd_remove() {
+	check_runtime_dir
+	[ $# -ge 1 ] || die --usage 'timer name is not specified'
+
+	local timer="$1" file
+
+	check_name_sanity "${timer}"
+
+	file="$(timer_file ${timer})"
+	[ -e "${file}" ] || die 'timer does not exist: %s' "${timer}"
+
+	rm "${file}" || die 'can not remove timer: %s' "${timer}"
+}
+
+cmd_isactive() {
+	check_runtime_dir
+	[ $# -ge 1 ] || die --usage 'timer name is not specified'
+
+	local timer="$1" file ts state elapsed duration
+
+	check_name_sanity "${timer}"
+
+	file="$(timer_file ${timer})"
+	[ -e "${file}" ] || die 'timer does not exist: %s' "${timer}"
+
+	read ts state elapsed duration < "${file}" \
+		|| die 'can not read timer file: %s' "${timer}"
+
+	check_integer_sanity "${ts}" timestamp
+	check_status_sanity "${state}"
+	check_integer_sanity "${elapsed}" elapsed
+	check_integer_sanity "${duration}" duration
+
+	[ "${state}" = 'a' -a "$(time_left "${ts}" "${elapsed}" "${duration}")" -gt 0 ]
+}
+
+cmd_left() {
+	check_runtime_dir
+	[ $# -ge 1 ] || die --usage 'timer name is not specified'
+
+	local timer="$1" file ts state elapsed duration now left
+
+	check_name_sanity "${timer}"
+
+	file="$(timer_file ${timer})"
+	[ -e "${file}" ] || die 'timer does not exist: %s' "${timer}"
+
+	read ts state elapsed duration < "${file}" \
+		|| die 'can not read timer file: %s' "${timer}"
+
+	check_integer_sanity "${ts}" timestamp
+	check_status_sanity "${state}"
+	check_integer_sanity "${elapsed}" elapsed
+	check_integer_sanity "${duration}" duration
+
+	case "${state}" in
+		a) time_left "${ts}" "${elapsed}" "${duration}" ;;
+		p) echo "$(( duration - elapsed ))" ;;
+	esac
+}
+
+cmd_wait() { die_cmdnotimpl wait; }
+
+cmd_list() {
+	check_runtime_dir
+
+	local rc
+
+	find "${RUNTIME_DIR}" -mindepth 1 -maxdepth 1 -name '*.timer' -printf '%f\n' \
+		| sed 's/\.timer$//'
+
+	rc=( "${PIPESTATUS[@]}" )
+	[ ${rc[0]} -eq 0 ] || die 'can not list files in timers directory'
+	[ ${rc[1]} -eq 0 ] || die 'can not process found filenames'
+}
+
+cmd_status() { die_cmdnotimpl status; }
+
+cmd_log() { die_cmdnotimpl log; }
+
+cmd_help() {
+	[ $# -eq 0 ] || die --usage
+
+	echo 'Setup timer user-widely.'
+	print_usage
+}
+
+[ $# -ge 1 ] || die --usage
+command="$1" && shift
+
+case "${command}" in
+	start) cmd_start "$@" ;;
+	pause) cmd_pause "$@" ;;
+	resume) cmd_resume "$@" ;;
+	remove|rm) cmd_remove "$@" ;;
+	is-active) cmd_isactive "$@" ;;
+	left) cmd_left "$@" ;;
+	wait) cmd_wait "$@" ;;
+	list|ls) cmd_list "$@" ;;
+	status) cmd_status "$@" ;;
+	log) cmd_log "$@" ;;
+	help|--help|-h) cmd_help "$@" ;;
+	*) die 'unknown command: %s' "${command}"
+esac
