@@ -1,7 +1,7 @@
 #!/bin/bash
 
 PROGRAM=timer
-VERSION=0.1.1
+VERSION=0.1.2
 
 RUNTIME_DIR="${SCAPTURE_RECORDS_PREFIX:-${XDG_RUNTIME_DIR:+${XDG_RUNTIME_DIR}/${PROGRAM}}}"
 
@@ -18,6 +18,8 @@ print_usage() {
 		        Exit with 0 if TIMER in active state.
 		    ${PROGRAM} left TIMER
 		        Print remaining time in seconds for the TIMER.
+		    ${PROGRAM} duration TIMER
+		        Print set at startup duration time in seconds for the TIMER.
 		    ${PROGRAM} help
 		        Print this message.
 	EOF
@@ -164,6 +166,25 @@ cmd_left() {
 	esac
 }
 
+cmd_duration() {
+	check_runtime_dir
+	[ $# -ge 1 ] || die --usage 'timer name is not specified'
+
+	local timer="$1" file duration 
+
+	check_name_sanity "${timer}"
+
+	file="$(timer_file ${timer})"
+	[ -e "${file}" ] || die 'timer does not exist: %s' "${timer}"
+
+	read _ _ _ duration < "${file}" \
+		|| die 'can not read timer file: %s' "${timer}"
+
+	check_integer_sanity "${duration}" duration
+
+	echo "${duration}"
+}
+
 cmd_wait() { die_cmdnotimpl wait; }
 
 cmd_list() {
@@ -200,6 +221,7 @@ case "${command}" in
 	remove|rm) cmd_remove "$@" ;;
 	is-active) cmd_isactive "$@" ;;
 	left) cmd_left "$@" ;;
+	duration) cmd_duration "$@" ;;
 	wait) cmd_wait "$@" ;;
 	list|ls) cmd_list "$@" ;;
 	status) cmd_status "$@" ;;
